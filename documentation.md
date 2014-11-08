@@ -1,6 +1,30 @@
 Documentation
 =====================
 
+- [HttpServer](#httpserver)
+	* [LoadMimes(file)](#loadmimesfile)
+	* [GetMimeType(file)](#getmimetypefile)
+	* [ServeFile(ByRef response, file)](#servefilebyref-response-file)
+	* [SetPaths(paths)](#setpathspaths)
+	* [Serve(port)](#serveport)
+	* [Handle(ByRef request)](#handlebyref-request)
+
+- [HttpRequest](#httprequest)
+	* [Headers](#headers)
+	* [Queries](#queries)
+	* [Path](#path)
+	* [Method](#method)
+	* [Protocol](#protocol)
+	* [IsMultipart](#ismultipart)
+	* [Done](#done)
+
+- [HttpResponse](#httpresponse)
+	* [Headers](#headers-1)
+	* [Protocol](#protocol-1)
+	* [SetBody(ByRef body, length)](#setbodybyref-body-length)
+	* [SetBodyText(text)](#setbodytexttext)
+	* [Generate](#generate)
+
 HttpServer
 ---------
 
@@ -106,19 +130,16 @@ response.protocol
 ```
 
 #### SetBody(ByRef body, length)
-Sets the request body.
+Sets the responses body.
 ```
-body - data for body of request
+body - data for body of response
 length - length of data
 ```
 
 #### SetBodyText(text)
-Sets the requests body as text.
-```
-text - text for body of request
-```
+Sets the responses body as text.
 
 #### Generate
-Returns a buffer that contains the response data.
+Returns a buffer that contains the responses data.
 
 ----------
