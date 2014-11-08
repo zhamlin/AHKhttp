@@ -35,7 +35,7 @@ class HttpServer
         response := new HttpResponse()
         if (!this.paths[request.path]) {
             func := this.paths["404"]
-            response.statusCode := 404
+            response.status := 404
             if (func)
                 func.(request, response)
             return response
@@ -58,25 +58,55 @@ HttpHandler(sEvent, iSocket = 0, sName = 0, sAddr = 0, sPort = 0, ByRef bData = 
 
     if (!sockets[iSocket]) {
         sockets[iSocket] := new Socket(iSocket)
+        AHKsock_SockOpt(iSocket, "SO_KEEPALIVE", true)
     }
     socket := sockets[iSocket]
 
-    if (sEvent == "ACCEPTED") {
-    } else if (sEvent == "DISCONNECTED") {
+    if (sEvent == "DISCONNECTED") {
+        socket.request := false
         sockets[iSocket] := false
     } else if (sEvent == "SEND") {
-        if (socket.Send()) {
+        if (socket.TrySend()) {
             socket.Close()
         }
+
     } else if (sEvent == "RECEIVED") {
         server := HttpServer.servers[sPort]
 
         text := StrGet(&bData, "UTF-8")
         request := new HttpRequest(text)
-        response := server.Handle(request)
 
-        if (socket.Send(response.Generate())) {
-            socket.Close()
+        ; Multipart request
+        if (request.IsMultipart()) {
+            length := request.headers["Content-Length"]
+            request.bytesLeft := length + 0
+
+            if (request.body) {
+                request.bytesLeft -= StrLen(request.body)
+            }
+            socket.request := request
+        } else if (socket.request) {
+            ; Get data and append it to the request body
+            socket.request.bytesLeft -= StrLen(text)
+            socket.request.body := socket.request.body . text
+        }
+
+        if (socket.request) {
+            request := socket.request
+            if (request.bytesLeft <= 0) {
+                request.done := true
+            }
+        }
+
+        response := server.Handle(request)
+        if (response.status) {
+            socket.SetData(response.Generate())
+
+            if (socket.TrySend()) {
+                if (!request.IsMultipart() || (request.IsMultipart() && request.done)) {
+                    socket.Close()
+                }
+            }
         }
     }
 }
@@ -115,7 +145,8 @@ class HttpRequest
     }
 
     Parse(data) {
-        data := StrSplit(data, "`n`n")
+        this.raw := data
+        data := StrSplit(data, "`n`r")
         headers := StrSplit(data[1], "`n")
         this.body := LTrim(data[2], "`n")
 
@@ -126,10 +157,19 @@ class HttpRequest
         for i, line in headers {
             pos := InStr(line, ":")
             key := SubStr(line, 1, pos - 1)
-            val := LTrim(SubStr(line, pos + 1))
+            val := Trim(SubStr(line, pos + 1), "`n`r ")
 
             this.headers[key] := val
         }
+    }
+
+    IsMultipart() {
+        length := this.headers["Content-Length"]
+        expect := this.headers["Expect"]
+
+        if (expect = "100-continue" && length > 0)
+            return true
+        return false
     }
 }
 
@@ -137,28 +177,44 @@ class HttpResponse
 {
     __New() {
         this.headers := {}
-        this.statusCode := 0
-        this.protocol := "HTTP/1.0"
+        this.status := 0
+        this.protocol := "HTTP/1.1"
 
-        this.SetBody("")
+        this.SetBodyText("")
     }
 
     Generate() {
         FormatTime, date,, ddd, d MMM yyyy HH:mm:ss
         this.headers["Date"] := date
 
-        response := this.protocol . " " . this.statusCode . "`n"
+        headers := this.protocol . " " . this.status . "`n"
         for key, value in this.headers {
-            response := response . key . ": " . value . "`n"
+            headers := headers . key . ": " . value . "`n"
         }
-        response := response . "`n" . this.body
-        return response
+        headers := headers . "`n"
+        length := this.headers["Content-Length"]
+
+        buffer := new Buffer((StrLen(headers) * 2) + length)
+        buffer.WriteStr(headers)
+
+        buffer.Append(this.body)
+        buffer.Done()
+
+        return buffer
     }
 
-    SetBody(body) {
-        this.headers["Content-Length"] := StrLen(body)
-        this.body := body
+    SetBody(ByRef body, length) {
+        this.body := new Buffer(length)
+        this.body.Write(&body, length)
+        this.headers["Content-Length"] := length
     }
+
+    SetBodyText(text) {
+        this.body := Buffer.FromString(text)
+        this.headers["Content-Length"] := this.body.length
+    }
+
+
 }
 
 class Socket
@@ -171,20 +227,20 @@ class Socket
         AHKsock_Close(this.socket, timeout)
     }
 
-    Send(data = "") {
-        if (data != "")
-            this.data := data
+    SetData(data) {
+        this.data := data
+    }
 
+    TrySend() {
         if (!this.data || this.data == "")
             return false
 
-        length := StrLen(this.data)
-        VarSetCapacity(outData, length + 1)
-        StrPut(this.data, &outData, "UTF-8")
+        p := this.data.GetPointer()
+        length := this.data.length
 
         this.dataSent := 0
         loop {
-            if ((i := AHKsock_Send(this.socket, &outData, length - this.dataSent)) < 0) {
+            if ((i := AHKsock_Send(this.socket, p, length - this.dataSent)) < 0) {
                 if (i == -2) {
                     return
                 } else {
@@ -203,5 +259,58 @@ class Socket
         this.data := ""
 
         return true
+    }
+}
+
+class Buffer
+{
+    __New(len) {
+        this.SetCapacity("buffer", len)
+        this.length := 0
+    }
+
+    FromString(str, encoding = "UTF-8") {
+        length := Buffer.GetStrSize(str, encoding)
+        buffer := new Buffer(length)
+        buffer.WriteStr(str)
+        return buffer
+    }
+
+    GetStrSize(str, encoding = "UTF-8") {
+        encodingSize := ((encoding="utf-16" || encoding="cp1200") ? 2 : 1)
+        ; length of string, minus null char
+        return StrPut(str, encoding) * encodingSize - encodingSize
+    }
+
+    WriteStr(str, encoding = "UTF-8") {
+        length := this.GetStrSize(str, encoding)
+        VarSetCapacity(text, length)
+        StrPut(str, &text, encoding)
+
+        this.Write(&text, length)
+        return length
+    }
+
+    ; data is a pointer to the data
+    Write(data, length) {
+        p := this.GetPointer()
+        DllCall("RtlMoveMemory", "uint", p + this.length, "uint", data, "uint", length)
+        this.length += length
+    }
+
+    Append(ByRef buffer) {
+        destP := this.GetPointer()
+        sourceP := buffer.GetPointer()
+
+        DllCall("RtlMoveMemory", "uint", destP + this.length, "uint", sourceP, "uint", buffer.length)
+        this.length += buffer.length
+    }
+
+    GetPointer() {
+        return this.GetAddress("buffer")
+    }
+
+    Done() {
+        this.SetCapacity("buffer", this.length)
     }
 }
