@@ -27,6 +27,47 @@ class HttpServer
 {
     static servers := {}
 
+    LoadMimes(file) {
+        if (!FileExist(file))
+            return false
+
+        FileRead, data, % file
+        types := StrSplit(data, "`n")
+        this.mimes := {}
+        for i, data in types {
+            info := StrSplit(data, " ")
+            type := info.Remove(1)
+            ; Seperates type of content and file types
+            info := StrSplit(LTrim(SubStr(data, StrLen(type) + 1)), " ")
+
+            for i, ext in info {
+                this.mimes[ext] := type
+            }
+        }
+        return true
+    }
+
+    GetMimeType(file) {
+        default := "text/plain"
+        if (!this.mimes)
+            return default
+
+        SplitPath, file,,, ext
+        type := this.mimes[ext]
+        if (!type)
+            return default
+        return type
+    }
+
+    ServeFile(ByRef response, file) {
+        f := FileOpen(file, "r")
+        length := f.RawRead(data, f.Length)
+        f.Close()
+
+        response.SetBody(data, length)
+        res.headers["Content-Type"] := this.GetMimeType(file)
+    }
+
     SetPaths(paths) {
         this.paths := paths
     }
@@ -37,10 +78,10 @@ class HttpServer
             func := this.paths["404"]
             response.status := 404
             if (func)
-                func.(request, response)
+                func.(request, response, this)
             return response
         } else {
-            this.paths[request.path].(request, response)
+            this.paths[request.path].(request, response, this)
         }
         return response
     }
