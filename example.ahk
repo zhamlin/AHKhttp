@@ -12,12 +12,12 @@ server.Serve(8000)
 return
 
 NotFound(ByRef req, ByRef res) {
-    res.SetBody("Page not found")
+    res.SetBodyText("Page not found")
 }
 
 HelloWorld(ByRef req, ByRef res) {
-    res.SetBody("Hello World")
-    res.statusCode := 200
+    res.SetBodyText("Hello World")
+    res.status := 200
 }
 
 #include, %A_ScriptDir%\AHKhttp.ahk
