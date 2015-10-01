@@ -228,11 +228,11 @@ class HttpResponse
         FormatTime, date,, ddd, d MMM yyyy HH:mm:ss
         this.headers["Date"] := date
 
-        headers := this.protocol . " " . this.status . "`n"
+        headers := this.protocol . " " . this.status . "`r`n"
         for key, value in this.headers {
-            headers := headers . key . ": " . value . "`n"
+            headers := headers . key . ": " . value . "`r`n"
         }
-        headers := headers . "`n"
+        headers := headers . "`r`n"
         length := this.headers["Content-Length"]
 
         buffer := new Buffer((StrLen(headers) * 2) + length)
