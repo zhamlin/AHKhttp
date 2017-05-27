@@ -115,40 +115,43 @@ HttpHandler(sEvent, iSocket = 0, sName = 0, sAddr = 0, sPort = 0, ByRef bData = 
         server := HttpServer.servers[sPort]
 
         text := StrGet(&bData, "UTF-8")
-        request := new HttpRequest(text)
 
-        ; Multipart request
-        if (request.IsMultipart()) {
+        ; New request or old?
+        if (socket.request) {
+            ; Get data and append it to the existing request body
+            socket.request.bytesLeft -= StrLen(text)
+            socket.request.body := socket.request.body . text
+            request := socket.request
+        } else {
+            ; Parse new request
+            request := new HttpRequest(text)
+
             length := request.headers["Content-Length"]
             request.bytesLeft := length + 0
 
             if (request.body) {
                 request.bytesLeft -= StrLen(request.body)
             }
+        }
+
+        if (request.bytesLeft <= 0) {
+            request.done := true
+        } else {
             socket.request := request
-        } else if (socket.request) {
-            ; Get data and append it to the request body
-            socket.request.bytesLeft -= StrLen(text)
-            socket.request.body := socket.request.body . text
         }
 
-        if (socket.request) {
-            request := socket.request
-            if (request.bytesLeft <= 0) {
-                request.done := true
+        if (request.done || request.IsMultipart()) {
+            response := server.Handle(request)
+            if (response.status) {
+                socket.SetData(response.Generate())
             }
         }
-
-        response := server.Handle(request)
-        if (response.status) {
-            socket.SetData(response.Generate())
-
-            if (socket.TrySend()) {
-                if (!request.IsMultipart() || (request.IsMultipart() && request.done)) {
-                    socket.Close()
-                }
+        if (socket.TrySend()) {
+            if (!request.IsMultipart() || request.done) {
+                socket.Close()
             }
-        }
+        }    
+
     }
 }
 
