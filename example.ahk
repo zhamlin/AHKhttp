@@ -7,10 +7,9 @@ paths["/"] := Func("HelloWorld")
 paths["404"] := Func("NotFound")
 paths["/logo"] := Func("Logo")
 
-server := new HttpServer()
+server := new HttpServer(8000)
 server.LoadMimes(A_ScriptDir . "/mime.types")
 server.SetPaths(paths)
-server.Serve(8000)
 return
 
 Logo(ByRef req, ByRef res, ByRef server) {
@@ -23,9 +22,9 @@ NotFound(ByRef req, ByRef res) {
 }
 
 HelloWorld(ByRef req, ByRef res) {
-    res.SetBodyText("Hello World")
+    res.SetBodyText("<html><head><title>Hello Autohotkey</title></head><body><img src='/logo'></img></br>Hello Autohotkey</body></html>")
     res.status := 200
 }
 
+#include Socket.ahk
 #include, %A_ScriptDir%\AHKhttp.ahk
-#include <AHKsock>
