@@ -23,10 +23,8 @@ class Uri
     }
 }    
 
-class HttpServer
+class HttpServer extends SocketTCP
 {
-    static servers := {}
-
     LoadMimes(file) {
         if (!FileExist(file))
         return false
@@ -86,60 +84,55 @@ class HttpServer
         return response
     }
     
-    Serve(port) {
+    __new(port) {
         this.port := port
-        this.sock := new SocketTCP()
-        this.sock.port := this.port
-                
+        base.__New()
+        
         this.sock.OnAccept := Func("HttpHandler")
-        this.sock.Bind(["0.0.0.0", this.port])
-        this.sock.Listen()
-        
-        HttpServer.servers[port] := this
-        
-        MsgBox % "Server started on port: " . this.port
-    }
-}
-
-HttpHandler(ServerSock) {
-    socket := ServerSock.Accept()
-    server := HttpServer.servers[ServerSock.port]
-    text := socket.RecvText()
-    
-    ; New request or old?
-    if (socket.request) {
-        ; Get data and append it to the existing request body
-        socket.request.bytesLeft -= StrLen(text)
-        socket.request.body := socket.request.body . text
-    request := socket.request
-    } else {
-        ; Parse new request
-        request := new HttpRequest(text)
-        
-        length := request.headers["Content-Length"]
-        request.bytesLeft := length + 0
-        
-        if (request.body) {
-            request.bytesLeft -= StrLen(request.body)
-        }
+        this.Bind(["0.0.0.0", this.port])
+        this.Listen()
     }
     
-    if (request.bytesLeft <= 0) {
-    request.done := true
-    } else {
-        socket.request := request
-    }
-    if (request.done || request.IsMultipart()) {
-        response := server.Handle(request)
-        if (response.status) {
-            socket.data := response.Generate()
+    
+    OnAccept() {
+        socket := this.Accept()
+        text := socket.RecvText()
+        
+        ; New request or old?
+        if (socket.request) {
+            ; Get data and append it to the existing request body
+            socket.request.bytesLeft -= StrLen(text)
+            socket.request.body := socket.request.body . text
+        request := socket.request
+        } else {
+            ; Parse new request
+            request := new HttpRequest(text)
+            
+            length := request.headers["Content-Length"]
+            request.bytesLeft := length + 0
+            
+            if (request.body) {
+                request.bytesLeft -= StrLen(request.body)
+            }
         }
-    }
-    if (socket.Send(socket.data.GetPointer(),socket.data.length)) {
-        if (!request.IsMultipart() || request.done) {
-            socket.Disconnect()
+        
+        if (request.bytesLeft <= 0) {
+        request.done := true
+        } else {
+            socket.request := request
         }
-    }    
+        if (request.done || request.IsMultipart()) {
+            response := this.Handle(request)
+            if (response.status) {
+                socket.data := response.Generate()
+            }
+        }
+        if (socket.Send(socket.data.GetPointer(),socket.data.length)) {
+            if (!request.IsMultipart() || request.done) {
+                socket.Disconnect()
+            }
+        }    
+    }
 }
 
 class HttpRequest
@@ -147,7 +140,7 @@ class HttpRequest
     __New(data = "") {
         if (data)
         this.Parse(data)
-    }
+        }
     
     GetPathInfo(top) {
         results := []
@@ -246,8 +239,6 @@ class HttpResponse
     } 
 }
 
-
-
 class DataBuffer
 {
     __New(len) {
@@ -299,4 +290,4 @@ class DataBuffer
     Done() {
         this.SetCapacity("buffer", this.length)
     }
-}
+}    
