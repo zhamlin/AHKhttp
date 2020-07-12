@@ -29,7 +29,6 @@ class HttpServer extends SocketTCP
         this.port := port
         base.__New()
         
-        this.sock.OnAccept := Func("HttpHandler")
         this.Bind(["0.0.0.0", this.port])
         this.Listen()
     }
