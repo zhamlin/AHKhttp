@@ -5,6 +5,19 @@ class Uri
             If RegExMatch(str, "i)(?<=%)[\da-f]{1,2}", hex)
                 StringReplace, str, str, `%%hex%, % Chr("0x" . hex), All
             Else Break
+            
+        RawLen := StrLen(str)
+        
+        ;;Not tested UTF-8 decode
+        ;Charset := 0    ; Put 1252 or 0       
+        ;BufSize := (RawLen + 1) * 2
+        ;VarSetCapacity(Buf, BufSize, 0)       
+        ;DllCall("MultiByteToWideChar", "uint", 65001, "int", 0, "str", str
+        ;                             , "int", -1, "uint", &Buf, "uint", RawLen + 1)
+        ;DllCall("WideCharToMultiByte", "uint", Charset, "int", 0, "uint", &Buf, "int", -1
+        ;                             , "str", str, "uint", RawLen + 1
+        ;                             , "int", 0, "int", 0)
+                
         Return, str
     }
 
@@ -60,12 +73,18 @@ class HttpServer
     }
 
     ServeFile(ByRef response, file) {
-        f := FileOpen(file, "r")
-        length := f.RawRead(data, f.Length)
-        f.Close()
-
-        response.SetBody(data, length)
-        res.headers["Content-Type"] := this.GetMimeType(file)
+        if (FileExist(file)) {
+          f := FileOpen(file, "r")
+          length := f.RawRead(data, f.Length)
+          f.Close()  
+          response.SetBody(data, length)
+          response.headers["Content-Type"] := this.GetMimeType(file)
+        } else {
+          func := this.paths["404"]
+          if (func)
+            func[1].("", response, this, func[2])
+          response.status := 404
+        }
     }
 
     SetPaths(paths) {
@@ -143,7 +162,7 @@ HttpHandler(sEvent, iSocket = 0, sName = 0, sAddr = 0, sPort = 0, ByRef bData = 
         if (request.done || request.IsMultipart()) {
             response := server.Handle(request)
             if (response.status) {
-                socket.SetData(response.Generate())
+              socket.data := response.Generate()                
             }
         }
         if (socket.TrySend()) {
@@ -227,6 +246,14 @@ class HttpResponse
         this.SetBodyText("")
     }
 
+    __Delete() {
+        this.ClearBuffer()
+    }    
+    
+    ClearBuffer() {
+        if (this.body)
+          this.body.ClearBuffer()    
+    }
     Generate() {
         FormatTime, date,, ddd, d MMM yyyy HH:mm:ss
         this.headers["Date"] := date
@@ -238,13 +265,12 @@ class HttpResponse
         headers := headers . "`r`n"
         length := this.headers["Content-Length"]
 
-        buffer := new Buffer((StrLen(headers) * 2) + length)
-        buffer.WriteStr(headers)
+        tmpBuf := new Buffer((StrLen(headers) * 2) + length)
+        tmpBuf.WriteStr(headers)
+        tmpBuf.Append(this.body)
+        tmpBuf.Done()
+        return tmpBuf
 
-        buffer.Append(this.body)
-        buffer.Done()
-
-        return buffer
     }
 
     SetBody(ByRef body, length) {
@@ -267,8 +293,20 @@ class Socket
         this.socket := socket
     }
 
+    __Delete() {
+      this.ClearBuffer()
+    }
+
+
+    ClearBuffer() {
+      if (this.data) 
+        this.data.ClearBuffer()
+      this.data := ""
+    }
+    
     Close(timeout = 5000) {
         AHKsock_Close(this.socket, timeout)
+        this.ClearBuffer()
     }
 
     SetData(data) {
@@ -300,7 +338,8 @@ class Socket
             }
         }
         this.dataSent := 0
-        this.data := ""
+        this.ClearBuffer()
+        p := 0
 
         return true
     }
@@ -309,15 +348,29 @@ class Socket
 class Buffer
 {
     __New(len) {
+        this.buffer := ""
         this.SetCapacity("buffer", len)
         this.length := 0
     }
 
+    __Delete() {        
+        if (this.buffer)   
+          this.ClearBuffer()        
+    }
+  
+    ClearBuffer() {
+      if (this.buffer) {
+        this.SetCapacity("buffer", 0)
+        this.length := 0
+        this.buffer := ""        
+      }
+    }
+
     FromString(str, encoding = "UTF-8") {
         length := Buffer.GetStrSize(str, encoding)
-        buffer := new Buffer(length)
-        buffer.WriteStr(str)
-        return buffer
+        tmpBuf := new Buffer(length)
+        tmpBuf.WriteStr(str)
+        return tmpBuf
     }
 
     GetStrSize(str, encoding = "UTF-8") {
@@ -329,9 +382,10 @@ class Buffer
     WriteStr(str, encoding = "UTF-8") {
         length := this.GetStrSize(str, encoding)
         VarSetCapacity(text, length)
-        StrPut(str, &text, encoding)
-
+        StrPut(str, &text, encoding)        
         this.Write(&text, length)
+        VarSetCapacity(text, 0)   
+        text = ""     
         return length
     }
 
@@ -342,12 +396,12 @@ class Buffer
         this.length += length
     }
 
-    Append(ByRef buffer) {
+    Append(ByRef addBuffer) {
         destP := this.GetPointer()
-        sourceP := buffer.GetPointer()
+        sourceP := addBuffer.GetPointer()
 
-        DllCall("RtlMoveMemory", "uint", destP + this.length, "uint", sourceP, "uint", buffer.length)
-        this.length += buffer.length
+        DllCall("RtlMoveMemory", "uint", destP + this.length, "uint", sourceP, "uint", addBuffer.length)
+        this.length += addBuffer.length
     }
 
     GetPointer() {
